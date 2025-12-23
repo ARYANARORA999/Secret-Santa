@@ -1,0 +1,321 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 50% 97%;
+    --foreground: 150 30% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 150 30% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 30% 15%;
+
+    --primary: 350 76% 45%;
+    --primary-foreground: 30 50% 97%;
+
+    --secondary: 150 40% 25%;
+    --secondary-foreground: 30 50% 97%;
+
+    --muted: 30 30% 92%;
+    --muted-foreground: 150 20% 40%;
+
+    --accent: 43 90% 55%;
+    --accent-foreground: 150 30% 15%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 30 30% 85%;
+    --input: 30 30% 85%;
+    --ring: 350 76% 45%;
+
+    --radius: 0.75rem;
+
+    /* Custom Christmas tokens */
+    --christmas-red: 350 76% 45%;
+    --christmas-green: 150 40% 25%;
+    --christmas-gold: 43 90% 55%;
+    --christmas-cream: 30 50% 97%;
+    --christmas-dark: 150 30% 15%;
+    
+    /* Gradients */
+    --gradient-festive: linear-gradient(135deg, hsl(350 76% 45%), hsl(350 76% 35%));
+    --gradient-gold: linear-gradient(135deg, hsl(43 90% 55%), hsl(38 85% 45%));
+    --gradient-snow: linear-gradient(180deg, hsl(210 50% 98%), hsl(30 50% 97%));
+    
+    /* Shadows */
+    --shadow-card: 0 4px 20px -4px hsl(350 76% 45% / 0.15);
+    --shadow-glow: 0 0 30px hsl(43 90% 55% / 0.3);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 150 30% 10%;
+    --foreground: 30 50% 97%;
+
+    --card: 150 25% 15%;
+    --card-foreground: 30 50% 97%;
+
+    --popover: 150 25% 15%;
+    --popover-foreground: 30 50% 97%;
+
+    --primary: 350 70% 55%;
+    --primary-foreground: 30 50% 97%;
+
+    --secondary: 150 35% 30%;
+    --secondary-foreground: 30 50% 97%;
+
+    --muted: 150 20% 20%;
+    --muted-foreground: 30 30% 70%;
+
+    --accent: 43 85% 50%;
+    --accent-foreground: 150 30% 10%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 150 20% 25%;
+    --input: 150 20% 25%;
+    --ring: 350 70% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', serif;
+  }
+}
+
+@layer components {
+  .btn-festive {
+    @apply bg-primary text-primary-foreground px-6 py-3 rounded-xl font-medium 
+           shadow-lg hover:shadow-xl transition-all duration-300 
+           hover:scale-105 active:scale-95;
+    background: var(--gradient-festive);
+  }
+
+  .btn-gold {
+    @apply text-christmas-dark px-6 py-3 rounded-xl font-semibold 
+           shadow-lg hover:shadow-xl transition-all duration-300 
+           hover:scale-105 active:scale-95;
+    background: var(--gradient-gold);
+  }
+
+  .card-gift {
+    @apply bg-card rounded-2xl p-6 border border-border transition-all duration-300;
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-gift:hover {
+    @apply scale-[1.02];
+    box-shadow: var(--shadow-glow);
+  }
+
+  .text-christmas-red {
+    color: hsl(var(--christmas-red));
+  }
+
+  .text-christmas-green {
+    color: hsl(var(--christmas-green));
+  }
+
+  .text-christmas-gold {
+    color: hsl(var(--christmas-gold));
+  }
+
+  .bg-christmas-red {
+    background-color: hsl(var(--christmas-red));
+  }
+
+  .bg-christmas-green {
+    background-color: hsl(var(--christmas-green));
+  }
+
+  .bg-christmas-gold {
+    background-color: hsl(var(--christmas-gold));
+  }
+
+  .bg-christmas-dark {
+    background-color: hsl(var(--christmas-dark));
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Playfair Display', serif;
+  }
+}
+
+/* Snow animation */
+@keyframes snowfall {
+  0% {
+    transform: translateY(-10vh) translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) translateX(20px);
+    opacity: 0.3;
+  }
+}
+
+.snowflake {
+  position: fixed;
+  top: -10vh;
+  color: white;
+  font-size: 1rem;
+  text-shadow: 0 0 5px rgba(255, 255, 255, 0.8);
+  animation: snowfall linear infinite;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Gift reveal animation */
+@keyframes unwrap {
+  0% {
+    transform: scale(0.8) rotate(-5deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.gift-reveal {
+  animation: unwrap 0.5s ease-out forwards;
+}
+
+/* Shimmer effect for locked gifts */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--christmas-gold) / 0.1) 0%,
+    hsl(var(--christmas-gold) / 0.3) 50%,
+    hsl(var(--christmas-gold) / 0.1) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Flying Santa and Reindeer animations */
+@keyframes fly-right {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120vw);
+  }
+}
+
+@keyframes fly-left {
+  0% {
+    transform: translateX(120vw);
+  }
+  100% {
+    transform: translateX(-120%);
+  }
+}
+
+.animate-fly-right {
+  animation: fly-right linear infinite;
+}
+
+.animate-fly-left {
+  animation: fly-left linear infinite;
+}
+
+/* Swaying trees */
+@keyframes sway {
+  0%, 100% {
+    transform: rotate(-2deg) translateX(0);
+  }
+  50% {
+    transform: rotate(2deg) translateX(5px);
+  }
+}
+
+.animate-sway {
+  animation: sway 4s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+/* Twinkling lights */
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+}
+
+.animate-twinkle {
+  animation: twinkle 1.5s ease-in-out infinite;
+}
+
+/* Swinging ornaments */
+@keyframes swing {
+  0%, 100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+
+.animate-swing {
+  animation: swing 3s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* Grand reveal confetti effect */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-100%) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.animate-confetti {
+  animation: confetti-fall 3s ease-out forwards;
+}
