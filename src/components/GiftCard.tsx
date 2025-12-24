@@ -1,4 +1,5 @@
-import { Gift } from '@/types/gift';
+import { Gift, GiftImage } from '@/types/gift';
+import { useEffect, useState } from 'react';
 import { Lock, Unlock, Eye, Trash2, HelpCircle } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import { Button } from './ui/button';
@@ -7,19 +8,64 @@ interface GiftCardProps {
   gift: Gift;
   isOwner: boolean;
   currentUser: string;
+  currentParticipantId?: string;
   isEventRevealed: boolean;
   onToggleLock: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-const GiftCard = ({ gift, isOwner, currentUser, isEventRevealed, onToggleLock, onDelete }: GiftCardProps) => {
-  const isRecipient = gift.toName.toLowerCase() === currentUser.toLowerCase();
+const GiftCard = ({ gift, isOwner, currentUser, currentParticipantId, isEventRevealed, onToggleLock, onDelete }: GiftCardProps) => {
+  const isRecipient =
+    (!!currentParticipantId && (gift as any).toParticipantId === currentParticipantId) ||
+    gift.toName.toLowerCase() === currentUser.toLowerCase();
   const canViewContent = isOwner || (isRecipient && gift.isUnlocked);
   // Show "From" only when: owner views their gift OR event is fully revealed
   const canSeeFrom = isOwner || isEventRevealed;
 
+  const [activeImage, setActiveImage] = useState<GiftImage | null>(null);
+
+  useEffect(() => {
+    if (!activeImage) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveImage(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeImage]);
+
   return (
     <div className="card-gift relative overflow-hidden group">
+      {activeImage && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setActiveImage(null)}
+        >
+          <div
+            className="relative max-w-5xl w-full max-h-[85vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={activeImage.url}
+              alt={activeImage.caption || 'Gift image'}
+              className="w-full h-full max-h-[85vh] object-contain rounded-xl"
+            />
+            {activeImage.caption && (
+              <div className="mt-3 text-center text-sm text-white/80">{activeImage.caption}</div>
+            )}
+            <button
+              type="button"
+              onClick={() => setActiveImage(null)}
+              className="absolute -top-3 -right-3 bg-white text-black rounded-full w-9 h-9 flex items-center justify-center shadow"
+              aria-label="Close"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {/* Lock indicator */}
       <div className="absolute top-4 right-4 z-10">
         {gift.isUnlocked ? (
@@ -76,7 +122,9 @@ const GiftCard = ({ gift, isOwner, currentUser, isEventRevealed, onToggleLock, o
               {gift.images.map((img) => (
                 <div
                   key={img.id}
-                  className="aspect-square rounded-xl overflow-hidden bg-muted"
+                  className="aspect-square rounded-xl overflow-hidden bg-muted cursor-zoom-in"
+                  onClick={() => setActiveImage(img)}
+                  title="Click to view"
                 >
                   <img
                     src={img.url}

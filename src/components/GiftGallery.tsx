@@ -61,6 +61,7 @@ const GiftGallery = ({ gifts, currentUser, currentParticipantId, isEventRevealed
               gift.fromName.toLowerCase() === currentUser.toLowerCase()
             }
             currentUser={currentUser}
+            currentParticipantId={currentParticipantId}
             isEventRevealed={isEventRevealed}
             onToggleLock={onToggleLock}
             onDelete={onDeleteGift}
