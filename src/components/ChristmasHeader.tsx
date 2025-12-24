@@ -1,15 +1,21 @@
-import { Gift } from 'lucide-react';
-
 const ChristmasHeader = () => {
   return (
     <header className="relative py-12 px-4 text-center">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-center gap-3 mb-4">
-          <Gift className="w-10 h-10 text-christmas-red animate-bounce-slow" />
+          <span className="text-5xl md:text-6xl animate-bounce-slow" aria-hidden>
+            🎄
+          </span>
           <h1 className="text-5xl md:text-6xl font-display font-bold text-christmas-dark">
             Secret Santa
           </h1>
-          <Gift className="w-10 h-10 text-christmas-green animate-bounce-slow" style={{ animationDelay: '0.5s' }} />
+          <span
+            className="text-5xl md:text-6xl animate-bounce-slow"
+            style={{ animationDelay: '0.5s' }}
+            aria-hidden
+          >
+            🎄
+          </span>
         </div>
         <p className="text-lg text-muted-foreground max-w-xl mx-auto">
           Share your gifts secretly and reveal them together on the big day! 
