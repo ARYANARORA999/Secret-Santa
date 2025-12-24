@@ -54,7 +54,9 @@ const Index = () => {
   const [participantsMap, setParticipantsMap] = useState<Record<string, string>>({}); // id -> display_name
 
   const [currentUser, setCurrentUser] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEY_USER) || '';
+    // In join-flow, the joined display name must drive currentUser.
+    const joined = sessionStorage.getItem(SS_DISPLAY_NAME_KEY) || '';
+    return joined || localStorage.getItem(STORAGE_KEY_USER) || '';
   });
 
   const [eventId, setEventId] = useState<string | null>(null);
@@ -90,6 +92,11 @@ const Index = () => {
   const mapDbGiftToGift = (r: any) => {
     return {
       id: r.id,
+      // Keep raw ids so the UI can determine ownership even before
+      // participantsMap is loaded (prevents lock/reveal buttons flickering).
+      fromParticipantId: r.from_participant_id,
+      toParticipantId: r.to_participant_id,
+
       fromName: participantsMap[r.from_participant_id] || 'Someone',
       toName: participantsMap[r.to_participant_id] || 'Someone',
       status: r.status as any,
@@ -97,7 +104,7 @@ const Index = () => {
       isUnlocked: !!r.is_unlocked,
       message: r.message || undefined,
       createdAt: new Date(r.created_at),
-    };
+    } as any;
   };
 
   const loadGiftsFromDb = async (evtId: string) => {
@@ -161,6 +168,14 @@ const Index = () => {
       navigate('/auth');
     }
   }, [user, loading, navigate, isLocalAuthMode, isJoinFlow]);
+
+  // Join-flow: always keep currentUser in sync with the joined display name
+  // so sender/recipient checks remain stable.
+  useEffect(() => {
+    if (!isJoinFlow) return;
+    if (!joinedDisplayName) return;
+    setCurrentUser((cur) => (cur && cur === joinedDisplayName ? cur : joinedDisplayName));
+  }, [isJoinFlow, joinedDisplayName]);
 
   // Join-flow: call RPC to mint participant_id + player_key (stored in sessionStorage)
   useEffect(() => {
@@ -645,6 +660,7 @@ const Index = () => {
               <GiftGallery
                 gifts={gifts}
                 currentUser={currentUser}
+                currentParticipantId={participantId || undefined}
                 isEventRevealed={isEventRevealed}
                 onToggleLock={handleToggleLock}
                 onDeleteGift={handleDeleteGift}

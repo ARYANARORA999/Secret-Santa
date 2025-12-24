@@ -5,12 +5,13 @@ import { Gift as GiftIcon } from 'lucide-react';
 interface GiftGalleryProps {
   gifts: Gift[];
   currentUser: string;
+  currentParticipantId?: string;
   isEventRevealed: boolean;
   onToggleLock: (id: string) => void;
   onDeleteGift: (id: string) => void;
 }
 
-const GiftGallery = ({ gifts, currentUser, isEventRevealed, onToggleLock, onDeleteGift }: GiftGalleryProps) => {
+const GiftGallery = ({ gifts, currentUser, currentParticipantId, isEventRevealed, onToggleLock, onDeleteGift }: GiftGalleryProps) => {
   if (gifts.length === 0) {
     return (
       <div className="card-gift text-center py-16">
@@ -25,8 +26,12 @@ const GiftGallery = ({ gifts, currentUser, isEventRevealed, onToggleLock, onDele
 
   // Sort: User's own gifts first, then gifts for them, then others
   const sortedGifts = [...gifts].sort((a, b) => {
-    const aIsOwner = a.fromName.toLowerCase() === currentUser.toLowerCase();
-    const bIsOwner = b.fromName.toLowerCase() === currentUser.toLowerCase();
+    const aIsOwner =
+      (!!currentParticipantId && (a as any).fromParticipantId === currentParticipantId) ||
+      a.fromName.toLowerCase() === currentUser.toLowerCase();
+    const bIsOwner =
+      (!!currentParticipantId && (b as any).fromParticipantId === currentParticipantId) ||
+      b.fromName.toLowerCase() === currentUser.toLowerCase();
     const aIsRecipient = a.toName.toLowerCase() === currentUser.toLowerCase();
     const bIsRecipient = b.toName.toLowerCase() === currentUser.toLowerCase();
 
@@ -51,7 +56,10 @@ const GiftGallery = ({ gifts, currentUser, isEventRevealed, onToggleLock, onDele
           <GiftCard
             key={gift.id}
             gift={gift}
-            isOwner={gift.fromName.toLowerCase() === currentUser.toLowerCase()}
+            isOwner={
+              (!!currentParticipantId && (gift as any).fromParticipantId === currentParticipantId) ||
+              gift.fromName.toLowerCase() === currentUser.toLowerCase()
+            }
             currentUser={currentUser}
             isEventRevealed={isEventRevealed}
             onToggleLock={onToggleLock}
