@@ -1,3 +1,56 @@
+-- Base tables for Secret Santa (run once)
+create extension if not exists pgcrypto;
+
+create table if not exists public.events (
+  id uuid not null default gen_random_uuid() primary key,
+  name text not null default 'Secret Santa',
+  created_by uuid not null,
+  is_revealed boolean not null default false,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now()
+);
+
+create table if not exists public.participants (
+  id uuid not null default gen_random_uuid() primary key,
+  event_id uuid not null references public.events(id) on delete cascade,
+  user_id uuid not null,
+  display_name text not null,
+  phone text,
+  created_at timestamp with time zone not null default now()
+);
+
+create table if not exists public.gifts (
+  id uuid not null default gen_random_uuid() primary key,
+  event_id uuid not null references public.events(id) on delete cascade,
+  from_participant_id uuid not null references public.participants(id) on delete cascade,
+  to_participant_id uuid not null references public.participants(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'partial', 'delivered')),
+  message text,
+  images text[] default '{}'::text[],
+  is_unlocked boolean not null default false,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now()
+);
+
+create or replace function public.update_updated_at_column()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql set search_path = public;
+
+drop trigger if exists update_events_updated_at on public.events;
+create trigger update_events_updated_at
+before update on public.events
+for each row execute function public.update_updated_at_column();
+
+drop trigger if exists update_gifts_updated_at on public.gifts;
+create trigger update_gifts_updated_at
+before update on public.gifts
+for each row execute function public.update_updated_at_column();
+
+
 -- Shared (multi-device) single-event setup for Secret Santa
 -- Run this in Supabase Dashboard -> SQL Editor.
 --
@@ -9,10 +62,9 @@
 --
 -- You must set a passcode once (see section at bottom).
 
-begin;
-
--- 1) Extensions
-create extension if not exists pgcrypto;
+-- NOTE:
+-- We intentionally avoid explicit BEGIN/COMMIT here because Supabase SQL Editor
+-- can run statements in a transaction already, and nested BEGIN blocks cause errors.
 
 -- 2) Columns to support passcode + player keys
 alter table public.events
@@ -39,7 +91,9 @@ returns text
 language sql
 stable
 as $$
-  select encode(digest(secret, 'sha256'), 'hex');
+  -- Fallback hash that works without pgcrypto (built-in Postgres function).
+  -- Not meant for high-security auth; it's a lightweight shared-passcode hash.
+  select md5(secret);
 $$;
 
 create or replace function public.ss_check_secret(secret text, secret_hash text)
@@ -47,7 +101,7 @@ returns boolean
 language sql
 stable
 as $$
-  select public.ss_hash_secret(secret) = secret_hash;
+  select md5(secret) = secret_hash;
 $$;
 
 create or replace function public.ss_random_key()
@@ -55,7 +109,11 @@ returns text
 language sql
 stable
 as $$
-  select encode(gen_random_bytes(32), 'hex');
+  -- Generate a reasonably-unique random key without pgcrypto.
+  -- Built from random() + timestamps; hashed to a compact hex string.
+  select md5(
+    random()::text || ':' || clock_timestamp()::text || ':' || txid_current()::text
+  );
 $$;
 
 -- 4) Single global event helpers
@@ -122,6 +180,7 @@ declare
   phash text;
   p_id uuid;
   pkey text;
+  dn text;
 begin
   eid := public.ss_get_or_create_global_event();
 
@@ -134,20 +193,23 @@ begin
     raise exception 'Invalid passcode';
   end if;
 
-  if display_name is null or length(trim(display_name)) < 1 then
+  dn := trim(display_name);
+
+  if dn is null or length(dn) < 1 then
     raise exception 'Display name is required';
   end if;
 
   -- existing participant?
   select id into p_id
   from public.participants
-  where event_id = eid and lower(display_name) = lower(trim(display_name))
+  where public.participants.event_id = eid
+    and lower(public.participants.display_name) = lower(dn)
   limit 1;
 
   if p_id is null then
     pkey := public.ss_random_key();
     insert into public.participants(event_id, user_id, display_name, player_key_hash)
-    values (eid, '00000000-0000-0000-0000-000000000000', trim(display_name), public.ss_hash_secret(pkey))
+    values (eid, '00000000-0000-0000-0000-000000000000', dn, public.ss_hash_secret(pkey))
     returning id into p_id;
   else
     -- If participant exists, mint a new key and rotate it (so you can re-join).
@@ -288,6 +350,169 @@ begin
 end;
 $$;
 
+-- 10b) RPC: toggle a gift's unlocked state (only as the sender)
+create or replace function public.ss_set_gift_unlocked(
+  p_event_id uuid,
+  p_participant_id uuid,
+  p_player_key text,
+  p_gift_id uuid,
+  p_is_unlocked boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  phash text;
+  sender_id uuid;
+begin
+  -- Verify caller identity
+  select player_key_hash into phash
+  from public.participants
+  where id = p_participant_id and event_id = p_event_id;
+
+  if phash is null or not public.ss_check_secret(p_player_key, phash) then
+    raise exception 'Unauthorized';
+  end if;
+
+  -- Ensure caller is the sender of this gift
+  select from_participant_id into sender_id
+  from public.gifts
+  where id = p_gift_id and event_id = p_event_id;
+
+  if sender_id is null then
+    raise exception 'Gift not found';
+  end if;
+
+  if sender_id <> p_participant_id then
+    raise exception 'Unauthorized';
+  end if;
+
+  update public.gifts
+    set is_unlocked = coalesce(p_is_unlocked, false)
+  where id = p_gift_id;
+end;
+$$;
+
+-- 10c) RPC: delete a gift (only as the sender)
+create or replace function public.ss_delete_gift(
+  p_event_id uuid,
+  p_participant_id uuid,
+  p_player_key text,
+  p_gift_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  phash text;
+  sender_id uuid;
+begin
+  -- Verify caller identity
+  select player_key_hash into phash
+  from public.participants
+  where id = p_participant_id and event_id = p_event_id;
+
+  if phash is null or not public.ss_check_secret(p_player_key, phash) then
+    raise exception 'Unauthorized';
+  end if;
+
+  -- Ensure caller is the sender of this gift
+  select from_participant_id into sender_id
+  from public.gifts
+  where id = p_gift_id and event_id = p_event_id;
+
+  if sender_id is null then
+    raise exception 'Gift not found';
+  end if;
+
+  if sender_id <> p_participant_id then
+    raise exception 'Unauthorized';
+  end if;
+
+  delete from public.gifts where id = p_gift_id;
+end;
+$$;
+
+-- 10d) RPC: update a gift (only as the sender)
+create or replace function public.ss_update_gift(
+  p_event_id uuid,
+  p_participant_id uuid,
+  p_player_key text,
+  p_gift_id uuid,
+  p_status text,
+  p_message text,
+  p_images text[],
+  p_is_unlocked boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  phash text;
+  sender_id uuid;
+begin
+  select player_key_hash into phash
+  from public.participants
+  where id = p_participant_id and event_id = p_event_id;
+
+  if phash is null or not public.ss_check_secret(p_player_key, phash) then
+    raise exception 'Unauthorized';
+  end if;
+
+  select from_participant_id into sender_id
+  from public.gifts
+  where id = p_gift_id and event_id = p_event_id;
+
+  if sender_id is null then
+    raise exception 'Gift not found';
+  end if;
+
+  if sender_id <> p_participant_id then
+    raise exception 'Unauthorized';
+  end if;
+
+  update public.gifts
+    set status = coalesce(p_status, status),
+        message = p_message,
+        images = coalesce(p_images, images),
+        is_unlocked = coalesce(p_is_unlocked, is_unlocked)
+  where id = p_gift_id;
+end;
+$$;
+
+-- 9b) RPC: end event (reveal) with all-ready gate
+-- Caller must be a valid participant in the event.
+create or replace function public.ss_end_event(
+  p_event_id uuid,
+  p_participant_id uuid,
+  p_player_key text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  phash text;
+begin
+  select player_key_hash into phash
+  from public.participants
+  where id = p_participant_id and event_id = p_event_id;
+
+  if phash is null or not public.ss_check_secret(p_player_key, phash) then
+    raise exception 'Unauthorized';
+  end if;
+
+  return public.ss_reveal_if_all_ready(p_event_id);
+end;
+$$;
+
 -- 11) RLS: allow public read, block direct writes
 alter table public.events enable row level security;
 alter table public.participants enable row level security;
@@ -361,9 +586,13 @@ grant execute on function public.ss_join_global_event(text, text) to anon, authe
 grant execute on function public.ss_remove_me(uuid, uuid, text) to anon, authenticated;
 grant execute on function public.ss_set_ready(uuid, uuid, text, boolean) to anon, authenticated;
 grant execute on function public.ss_reveal_if_all_ready(uuid) to anon, authenticated;
+grant execute on function public.ss_end_event(uuid, uuid, text) to anon, authenticated;
 grant execute on function public.ss_add_gift(uuid, uuid, text, uuid, text, text, text[], boolean) to anon, authenticated;
+grant execute on function public.ss_update_gift(uuid, uuid, text, uuid, text, text, text[], boolean) to anon, authenticated;
+grant execute on function public.ss_set_gift_unlocked(uuid, uuid, text, uuid, boolean) to anon, authenticated;
+grant execute on function public.ss_delete_gift(uuid, uuid, text, uuid) to anon, authenticated;
 
-commit;
+
 
 -- After running this script:
 -- 1) Set the global passcode once:

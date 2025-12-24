@@ -112,6 +112,22 @@ const Index = () => {
     }
   };
 
+  const loadEventFromDb = async (evtId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('id,is_revealed')
+        .eq('id', evtId)
+        .single();
+      if (error) throw error;
+      if (data) {
+        setIsEventRevealed(!!(data as any).is_revealed);
+      }
+    } catch (err) {
+      console.error('loadEventFromDb', err);
+    }
+  };
+
   const loadParticipantsFromDb = async (evtId: string) => {
     try {
       const { data, error } = await supabase.from('participants').select('id,display_name').eq('event_id', evtId).order('created_at', { ascending: true });
@@ -173,7 +189,12 @@ const Index = () => {
         if (row?.event_id) setEventId(row.event_id);
       } catch (err) {
         console.error('ss_join_global_event error', err);
-        toast.error('Failed to join event. Check passcode and try again.');
+        const msg =
+          (err as any)?.message ||
+          (err as any)?.error_description ||
+          (err as any)?.details ||
+          'Failed to join event. Check passcode and try again.';
+        toast.error(String(msg));
         navigate('/auth');
       }
     })();
@@ -271,6 +292,7 @@ const Index = () => {
     const iv = setInterval(() => {
       loadParticipantsFromDb(eventId);
       loadGiftsFromDb(eventId);
+      loadEventFromDb(eventId);
     }, 3000);
     return () => clearInterval(iv);
   }, [eventId]);
@@ -310,7 +332,7 @@ const Index = () => {
 
   const handleAddGift = (gift: Gift) => {
     // Persist to DB when we have an event and authenticated user
-    if (user && eventId) {
+    if (eventId && (user || isJoinFlow)) {
       // find participant ids
       const fromId = Object.keys(participantsMap).find((k) => participantsMap[k] === gift.fromName);
       const toId = Object.keys(participantsMap).find((k) => participantsMap[k] === gift.toName);
@@ -319,6 +341,45 @@ const Index = () => {
         return;
       }
 
+      // Shared join-flow: direct writes are blocked by RLS, so we must use RPC.
+      if (isJoinFlow) {
+        const pid = participantId;
+        const pkey = playerKey;
+        if (!pid || !pkey) {
+          toast.error('Session expired. Please re-join the event.');
+          navigate('/auth');
+          return;
+        }
+
+        (async () => {
+          const { error } = await (supabase as any).rpc('ss_add_gift', {
+            p_event_id: eventId,
+            p_from_participant_id: pid,
+            p_player_key: pkey,
+            p_to_participant_id: toId,
+            p_status: gift.status,
+            p_message: gift.message || null,
+            p_images: gift.images.map((i) => i.url),
+            p_is_unlocked: gift.isUnlocked,
+          });
+          if (error) {
+            console.error('ss_add_gift error', error);
+            const msg =
+              (error as any)?.message ||
+              (error as any)?.details ||
+              (error as any)?.hint ||
+              'Failed to add gift';
+            toast.error(String(msg));
+            return;
+          }
+          if (eventId) await loadGiftsFromDb(eventId);
+          toast.success(`Gift for ${gift.toName} wrapped and ready! 🎁`);
+        })();
+
+        return;
+      }
+
+      // Legacy auth flow (if enabled): allow direct insert (RLS may permit depending on policies)
       supabase
         .from('gifts')
         .insert({
@@ -348,11 +409,46 @@ const Index = () => {
 
   const handleToggleLock = (id: string) => {
     // If using DB, toggle there
-    if (user && eventId) {
+    if (eventId && (user || isJoinFlow)) {
       // find gift row and toggle
       const g = gifts.find((x) => x.id === id);
       if (!g) return;
       const newState = !g.isUnlocked;
+
+      if (isJoinFlow) {
+        const pid = participantId;
+        const pkey = playerKey;
+        if (!pid || !pkey) {
+          toast.error('Session expired. Please re-join the event.');
+          navigate('/auth');
+          return;
+        }
+
+        (async () => {
+          const { error } = await (supabase as any).rpc('ss_set_gift_unlocked', {
+            p_event_id: eventId,
+            p_participant_id: pid,
+            p_player_key: pkey,
+            p_gift_id: id,
+            p_is_unlocked: newState,
+          });
+          if (error) {
+            console.error('ss_set_gift_unlocked error', error);
+            const msg =
+              (error as any)?.message ||
+              (error as any)?.details ||
+              (error as any)?.hint ||
+              'Failed to update gift';
+            toast.error(String(msg));
+            return;
+          }
+          await loadGiftsFromDb(eventId);
+          toast.success(newState ? `Gift revealed to ${g.toName}! 🎄` : `Gift hidden from ${g.toName}`);
+        })();
+
+        return;
+      }
+
       supabase.from('gifts').update({ is_unlocked: newState }).eq('id', id).then(({ error }) => {
         if (error) {
           console.error('Toggle lock error', error);
@@ -381,7 +477,40 @@ const Index = () => {
   };
 
   const handleDeleteGift = (id: string) => {
-    if (user && eventId) {
+    if (eventId && (user || isJoinFlow)) {
+      if (isJoinFlow) {
+        const pid = participantId;
+        const pkey = playerKey;
+        if (!pid || !pkey) {
+          toast.error('Session expired. Please re-join the event.');
+          navigate('/auth');
+          return;
+        }
+
+        (async () => {
+          const { error } = await (supabase as any).rpc('ss_delete_gift', {
+            p_event_id: eventId,
+            p_participant_id: pid,
+            p_player_key: pkey,
+            p_gift_id: id,
+          });
+          if (error) {
+            console.error('ss_delete_gift error', error);
+            const msg =
+              (error as any)?.message ||
+              (error as any)?.details ||
+              (error as any)?.hint ||
+              'Failed to remove gift';
+            toast.error(String(msg));
+            return;
+          }
+          await loadGiftsFromDb(eventId);
+          toast.success('Gift removed');
+        })();
+
+        return;
+      }
+
       supabase.from('gifts').delete().eq('id', id).then(({ error }) => {
         if (error) {
           console.error('Delete gift error', error);
@@ -398,6 +527,44 @@ const Index = () => {
   };
 
   const handleEndEvent = () => {
+    if (eventId && isJoinFlow) {
+      const pid = participantId;
+      const pkey = playerKey;
+      if (!pid || !pkey) {
+        toast.error('Session expired. Please re-join the event.');
+        navigate('/auth');
+        return;
+      }
+
+      (async () => {
+        const { data, error } = await (supabase as any).rpc('ss_end_event', {
+          p_event_id: eventId,
+          p_participant_id: pid,
+          p_player_key: pkey,
+        });
+        if (error) {
+          console.error('ss_end_event error', error);
+          const msg =
+            (error as any)?.message ||
+            (error as any)?.details ||
+            (error as any)?.hint ||
+            'Failed to end event';
+          toast.error(String(msg));
+          return;
+        }
+
+        const ok = Array.isArray(data ?? []) ? (data ?? [])[0] : data;
+        if (ok === true) {
+          await loadEventFromDb(eventId);
+          toast.success('🎉 The big reveal! Everyone can now see who their Secret Santa was!');
+        } else {
+          toast.error('Not everyone is ready yet. Ask everyone to mark ready first.');
+        }
+      })();
+
+      return;
+    }
+
     setIsEventRevealed(true);
     toast.success('🎉 The big reveal! Everyone can now see who their Secret Santa was!');
   };
