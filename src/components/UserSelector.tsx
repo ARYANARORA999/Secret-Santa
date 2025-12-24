@@ -1,13 +1,10 @@
-import { useState } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Users, UserPlus, X, Sparkles } from 'lucide-react';
+import { Users, X, Sparkles } from 'lucide-react';
 
 interface UserSelectorProps {
   participants: string[];
   currentUser: string;
   authName?: string;
+  canRemoveParticipant?: (name: string) => boolean;
   onSetCurrentUser: (name: string) => void;
   onAddParticipant: (name: string) => void;
   onRemoveParticipant: (name: string) => void;
@@ -20,16 +17,8 @@ const UserSelector = ({
   onAddParticipant,
   onRemoveParticipant,
   authName,
+  canRemoveParticipant,
 }: UserSelectorProps) => {
-  const [newName, setNewName] = useState('');
-
-  const handleAddParticipant = () => {
-    if (newName.trim() && !participants.includes(newName.trim())) {
-      onAddParticipant(newName.trim());
-      setNewName('');
-    }
-  };
-
   return (
     <div className="card-gift max-w-2xl mx-auto">
       <div className="flex items-center gap-2 mb-6">
@@ -37,24 +26,9 @@ const UserSelector = ({
         <h2 className="text-2xl font-display font-semibold">Who's Playing?</h2>
       </div>
 
-      {/* Add participant */}
-      <div className="flex gap-2 mb-6">
-        <div className="flex-1">
-          <Label htmlFor="newParticipant" className="sr-only">
-            Add participant
-          </Label>
-          <Input
-            id="newParticipant"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Enter friend's name"
-            onKeyDown={(e) => e.key === 'Enter' && handleAddParticipant()}
-          />
-        </div>
-        <Button onClick={handleAddParticipant} variant="secondary" className="gap-2">
-          <UserPlus className="w-4 h-4" />
-          Add
-        </Button>
+      {/* Participants join by logging in; disable manual adds */}
+      <div className="mb-6 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        Participants are added automatically when they log in using your link.
       </div>
 
       {/* Participants list */}
@@ -67,6 +41,7 @@ const UserSelector = ({
             {participants.map((name) => {
               const isAuthName = authName && authName === name;
               const canSelect = !authName || isAuthName; // if authName provided, only allow selecting your own name
+              const canRemove = (canRemoveParticipant ? canRemoveParticipant(name) : !authName || isAuthName);
               return (
                 <div
                   key={name}
@@ -82,15 +57,19 @@ const UserSelector = ({
                     <Sparkles className="w-4 h-4" />
                   )}
                   <span className="font-medium">{name}{isAuthName ? ' (you)' : ''}</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveParticipant(name);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-destructive/20"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  {canRemove && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveParticipant(name);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-destructive/20"
+                      aria-label={`Remove ${name}`}
+                      title={isAuthName ? 'Remove yourself' : undefined}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               );
             })}

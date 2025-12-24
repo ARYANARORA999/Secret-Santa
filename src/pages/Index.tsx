@@ -15,6 +15,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { LogOut, Loader2 } from 'lucide-react';
 
+const SS_EVENT_CODE_KEY = 'ss.eventCode.v1';
+const SS_PASSCODE_KEY = 'ss.eventPasscode.v1';
+const SS_DISPLAY_NAME_KEY = 'ss.displayName.v1';
+const SS_PARTICIPANT_ID_KEY = 'ss.participantId.v1';
+const SS_PLAYER_KEY_KEY = 'ss.playerKey.v1';
+
 const STORAGE_KEY_PARTICIPANTS = 'secret-santa-participants';
 const STORAGE_KEY_GIFTS = 'secret-santa-gifts';
 const STORAGE_KEY_USER = 'secret-santa-current-user';
@@ -24,8 +30,21 @@ const Index = () => {
   const navigate = useNavigate();
   const { user, loading, signOut } = useAuth();
 
-  // Attempt to derive the authenticated user's display name from Supabase user metadata
-  const authDisplayName = user?.user_metadata?.display_name || user?.user_metadata?.full_name || '';
+  // Multi-device join identity is stored in sessionStorage (no Supabase Auth).
+  const joinedDisplayName = sessionStorage.getItem(SS_DISPLAY_NAME_KEY) || '';
+  const eventCode = sessionStorage.getItem(SS_EVENT_CODE_KEY) || '';
+  const passcode = sessionStorage.getItem(SS_PASSCODE_KEY) || '';
+  const participantId = sessionStorage.getItem(SS_PARTICIPANT_ID_KEY) || '';
+  const playerKey = sessionStorage.getItem(SS_PLAYER_KEY_KEY) || '';
+
+  // Backwards compat: if `useAuth` has a supabase user, we can still derive a name.
+  const authDisplayName = joinedDisplayName || user?.user_metadata?.display_name || user?.user_metadata?.full_name || '';
+
+  // For now, consider we are in the new flow if we have a joinedDisplayName.
+  const isJoinFlow = !!joinedDisplayName;
+
+  // Legacy local-only auth mode flag (kept, but join flow takes priority)
+  const isLocalAuthMode = !isJoinFlow && !!user && !(user as any)?.aud;
 
   const [participants, setParticipants] = useState<string[]>(() => {
     const stored = localStorage.getItem(STORAGE_KEY_PARTICIPANTS);
@@ -121,10 +140,44 @@ const Index = () => {
 
   // Redirect to auth if not logged in
   useEffect(() => {
-    if (!loading && !user) {
+    // Join-flow: require passcode + event code + display name
+    if (!loading && !isLocalAuthMode && !user && !isJoinFlow) {
       navigate('/auth');
     }
-  }, [user, loading, navigate]);
+  }, [user, loading, navigate, isLocalAuthMode, isJoinFlow]);
+
+  // Join-flow: call RPC to mint participant_id + player_key (stored in sessionStorage)
+  useEffect(() => {
+    if (!isJoinFlow) return;
+    if (!eventCode || !passcode || !joinedDisplayName) {
+      navigate('/auth');
+      return;
+    }
+    if (participantId && playerKey) return;
+
+    (async () => {
+      try {
+        // Single global event: eventCode must be GLOBAL
+        const { data, error } = await (supabase as any).rpc('ss_join_global_event', {
+          passcode,
+          display_name: joinedDisplayName,
+        });
+        if (error) throw error;
+
+        const row = Array.isArray(data ?? []) ? (data ?? [])[0] : data;
+        if (!row?.participant_id || !row?.player_key) {
+          throw new Error('Join failed');
+        }
+        sessionStorage.setItem(SS_PARTICIPANT_ID_KEY, row.participant_id);
+        sessionStorage.setItem(SS_PLAYER_KEY_KEY, row.player_key);
+        if (row?.event_id) setEventId(row.event_id);
+      } catch (err) {
+        console.error('ss_join_global_event error', err);
+        toast.error('Failed to join event. Check passcode and try again.');
+        navigate('/auth');
+      }
+    })();
+  }, [isJoinFlow, eventCode, passcode, joinedDisplayName, participantId, playerKey, navigate]);
 
   // When a user logs in, ensure their name is in the participants list and
   // auto-select them as the current user so they can only act as themselves.
@@ -157,21 +210,40 @@ const Index = () => {
 
   // When a user logs in we will ensure an event exists and load participants + gifts from DB
   useEffect(() => {
-    if (!loading && user) {
+    if (!loading && user && !isLocalAuthMode) {
       (async () => {
         const id = await ensureEvent();
         if (id) {
           await loadParticipantsFromDb(id);
           await loadGiftsFromDb(id);
           setEventId(id);
+
+          // Ensure this authenticated user has a participant row for the event
+          try {
+            const { data: existing } = await supabase
+              .from('participants')
+              .select('id,display_name')
+              .eq('event_id', id)
+              .eq('user_id', user.id)
+              .limit(1)
+              .single();
+
+            if (!existing) {
+              const display = authDisplayName || `Player-${user.id.slice(0,6)}`;
+              await supabase.from('participants').insert({ event_id: id, user_id: user.id, display_name: display });
+              await loadParticipantsFromDb(id);
+            }
+          } catch (err) {
+            // ignore insert conflicts or permission errors — loadParticipants already called
+          }
         }
       })();
     }
-  }, [user, loading]);
+  }, [user, loading, isLocalAuthMode]);
 
   // Prompt for a display name on first sign-in if missing
   useEffect(() => {
-    if (user && !authDisplayName && !promptedForName) {
+    if (user && !isLocalAuthMode && !authDisplayName && !promptedForName) {
       const name = window.prompt('Welcome! Please enter your display name for Secret Santa:');
       if (name && name.trim()) {
         supabase.auth.updateUser({ data: { display_name: name.trim() } }).then(({ error }) => {
@@ -202,26 +274,19 @@ const Index = () => {
     }, 3000);
     return () => clearInterval(iv);
   }, [eventId]);
-  const handleAddParticipant = (name: string) => {
-    // If logged in and event exists, insert into DB so others can see it
-    if (user && eventId) {
-      supabase.from('participants').insert({ event_id: eventId, user_id: user.id, display_name: name }).then(({ error }) => {
-        if (error) {
-          console.error('Add participant error', error);
-          toast.error('Failed to add participant');
-        } else {
-          // reload participants
-          loadParticipantsFromDb(eventId);
-          toast.success(`${name} joined the party! 🎉`);
-        }
-      });
-    } else {
-      setParticipants((prev) => [...prev, name]);
-      toast.success(`${name} joined the party! 🎉`);
-    }
+  const handleAddParticipant = (_name: string) => {
+    // Deployment requirement: you can't add other people manually.
+    // Participants are added automatically when they log in.
+    toast.error('Participants are added automatically when they log in.');
   };
 
   const handleRemoveParticipant = (name: string) => {
+    // Client-side guard: only allow removing yourself.
+    // (Server-side enforcement will be added in shared-mode RPC.)
+    if (authDisplayName && name !== authDisplayName) {
+      toast.error('You can only remove yourself.');
+      return;
+    }
     if (user && eventId) {
       // Only allow removing your own participant record in DB (RLS will enforce)
       supabase.from('participants').delete().eq('event_id', eventId).eq('display_name', name).then(({ error }) => {
@@ -338,6 +403,13 @@ const Index = () => {
   };
 
   const handleSignOut = async () => {
+    // Clear join-flow session
+    sessionStorage.removeItem(SS_EVENT_CODE_KEY);
+    sessionStorage.removeItem(SS_PASSCODE_KEY);
+    sessionStorage.removeItem(SS_DISPLAY_NAME_KEY);
+    sessionStorage.removeItem(SS_PARTICIPANT_ID_KEY);
+    sessionStorage.removeItem(SS_PLAYER_KEY_KEY);
+
     await signOut();
     navigate('/auth');
   };
@@ -382,6 +454,7 @@ const Index = () => {
               participants={participants}
               currentUser={currentUser}
               authName={authDisplayName}
+              canRemoveParticipant={(name) => !!authDisplayName && name === authDisplayName}
               onSetCurrentUser={setCurrentUser}
               onAddParticipant={handleAddParticipant}
               onRemoveParticipant={handleRemoveParticipant}

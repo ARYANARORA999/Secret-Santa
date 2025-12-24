@@ -1,130 +1,67 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import SnowEffect from '@/components/SnowEffect';
 import ChristmasDecorations from '@/components/ChristmasDecorations';
-import { Phone, KeyRound, Sparkles } from 'lucide-react';
-import { z } from 'zod';
+import { Sparkles } from 'lucide-react';
 
-const phoneSchema = z.string().regex(/^\+[1-9]\d{6,14}$/, 'Phone must be in format +1234567890');
-const emailSchema = z.string().email('Please enter a valid email address');
+const SS_EVENT_CODE_KEY = 'ss.eventCode.v1';
+const SS_PASSCODE_KEY = 'ss.eventPasscode.v1';
+const SS_DISPLAY_NAME_KEY = 'ss.displayName.v1';
 
 const Auth = () => {
   const navigate = useNavigate();
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
+  const [eventCode, setEventCode] = useState('');
+  const [passcode, setPasscode] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [method, setMethod] = useState<'phone' | 'email'>('phone');
+  const [loading, setLoading] = useState(false);
 
+  // Prefill event code from URL like /auth?event=ABCD12
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        navigate('/');
-      }
-    });
+    try {
+      const u = new URL(window.location.href);
+      const e = u.searchParams.get('event') || '';
+      if (e) setEventCode(e);
+    } catch {
+      // ignore
+    }
+  }, []);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        navigate('/');
-      }
-    });
-
-    return () => subscription.unsubscribe();
+  // If already joined, go home
+  useEffect(() => {
+    const existing = sessionStorage.getItem(SS_DISPLAY_NAME_KEY);
+    if (existing) navigate('/');
   }, [navigate]);
 
-  const handleSendOtp = async () => {
+  const handleJoin = async () => {
+    if (!eventCode.trim()) {
+      toast.error('Missing event code. Please use the invite link.');
+      return;
+    }
+    if (!passcode) {
+      toast.error('Please enter the event passcode');
+      return;
+    }
     if (!displayName.trim()) {
-      toast.error('Please enter your display name');
+      toast.error('Please enter your name');
       return;
     }
 
     setLoading(true);
     try {
-      if (method === 'phone') {
-        try {
-          phoneSchema.parse(phone);
-        } catch (err) {
-          toast.error('Please enter a valid phone number (e.g., +1234567890)');
-          setLoading(false);
-          return;
-        }
-
-        const { error } = await supabase.auth.signInWithOtp({
-          phone,
-          options: {
-            data: {
-              display_name: displayName
-            }
-          }
-        });
-
-        if (error) throw error;
-
-        setOtpSent(true);
-        toast.success('OTP sent to your phone! 📱');
-      } else {
-        // email method: send magic link / email OTP
-        try {
-          emailSchema.parse(email);
-        } catch (err) {
-          toast.error('Please enter a valid email address');
-          setLoading(false);
-          return;
-        }
-
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: {
-              display_name: displayName
-            }
-          }
-        });
-
-        if (error) throw error;
-
-        setOtpSent(true);
-        toast.success('Magic link sent — check your email ✉️');
-      }
-    } catch (error: any) {
-      console.error('OTP Error:', error);
-      toast.error(`${error?.status ? `(${error.status}) ` : ''}${error?.message || 'Failed to send code. Please try again.'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (method !== 'phone') return; // only phone uses SMS verification code path
-
-    if (otp.length < 6) {
-      toast.error('Please enter the 6-digit OTP');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.verifyOtp({
-        phone,
-        token: otp,
-        type: 'sms'
-      });
-
-      if (error) throw error;
-
-      toast.success('Welcome to Secret Santa! 🎅');
+      // For now, store the join info in sessionStorage.
+      // Next step: call Supabase RPC to validate passcode and mint player_key.
+      sessionStorage.setItem(SS_EVENT_CODE_KEY, eventCode.trim());
+      sessionStorage.setItem(SS_PASSCODE_KEY, passcode);
+      sessionStorage.setItem(SS_DISPLAY_NAME_KEY, displayName.trim());
+      toast.success('Joined!');
       navigate('/');
-    } catch (error: any) {
-      console.error('Verify Error:', error);
-      toast.error(error.message || 'Invalid OTP. Please try again.');
+    } catch (err: any) {
+      console.error('Join error', err);
+      toast.error(err?.message || 'Failed to join');
     } finally {
       setLoading(false);
     }
@@ -134,7 +71,7 @@ const Auth = () => {
     <div className="min-h-screen bg-background relative overflow-hidden">
       <SnowEffect />
       <ChristmasDecorations />
-      
+
       <div className="relative z-20 min-h-screen flex items-center justify-center p-4">
         <div className="card-gift max-w-md w-full p-8">
           <div className="text-center mb-8">
@@ -144,156 +81,54 @@ const Auth = () => {
               <span className="text-4xl animate-bounce-slow" style={{ animationDelay: '0.6s' }}>🎁</span>
             </div>
             <h1 className="text-3xl font-display font-bold text-foreground mb-2">
-              Join Secret Santa
+              Secret Santa Login
             </h1>
-            <p className="text-muted-foreground">
-              Enter your phone to receive a magic code ✨
-            </p>
+            <p className="text-muted-foreground">Join the event using the invite link + passcode</p>
           </div>
 
           <div className="space-y-6">
-            <div className="flex gap-2.justify-center mb-2">
-              <button
-                className={`px-4 py-2 rounded ${method === 'phone' ? 'bg-christmas-green text-white' : 'bg-transparent border'}`}
-                onClick={() => setMethod('phone')}
-                type="button"
-              >
-                Phone
-              </button>
-              <button
-                className={`px-4 py-2 rounded ${method === 'email' ? 'bg-christmas-gold text-white' : 'bg-transparent border'}`}
-                onClick={() => setMethod('email')}
-                type="button"
-              >
-                Email
-              </button>
+            <div className="space-y-2">
+              <Label htmlFor="eventCode" className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-christmas-gold" />
+                Event code
+              </Label>
+              <Input
+                id="eventCode"
+                type="text"
+                placeholder="From your invite link"
+                value={eventCode}
+                onChange={(e) => setEventCode(e.target.value)}
+                className="text-lg"
+              />
             </div>
 
-            {!otpSent ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="displayName" className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-christmas-gold" />
-                    Your Name
-                  </Label>
-                  <Input
-                    id="displayName"
-                    type="text"
-                    placeholder="Santa Claus"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="text-lg"
-                  />
-                </div>
+            <div className="space-y-2">
+              <Label htmlFor="passcode">Passcode</Label>
+              <Input
+                id="passcode"
+                type="password"
+                placeholder="Event passcode"
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                className="text-lg"
+              />
+            </div>
 
-                {method === 'phone' ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="phone" className="flex items-center gap-2">
-                      <Phone className="w-4 h-4 text-christmas-green" />
-                      Phone Number
-                    </Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="+1234567890"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="text-lg"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Include country code (e.g., +1 for US)
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="email" className="flex items-center gap-2">
-                      <KeyRound className="w-4 h-4 text-christmas-gold" />
-                      Email Address
-                    </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="text-lg"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      We'll send a magic link to this email.
-                    </p>
-                  </div>
-                )}
+            <div className="space-y-2">
+              <Label htmlFor="displayName">Your name</Label>
+              <Input
+                id="displayName"
+                type="text"
+                placeholder="e.g. Aryan"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="text-lg"
+              />
+            </div>
 
-                <Button
-                  onClick={handleSendOtp}
-                  disabled={loading}
-                  className="w-full btn-festive text-lg py-6"
-                >
-                  {loading ? 'Sending...' : method === 'phone' ? 'Send Magic Code 🪄' : 'Send Magic Link ✉️'}
-                </Button>
-              </>
-            ) : (
-              <>
-                {method === 'phone' ? (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="otp" className="flex items-center gap-2">
-                        <KeyRound className="w-4 h-4 text-christmas-gold" />
-                        Enter OTP Code
-                      </Label>
-                      <Input
-                        id="otp"
-                        type="text"
-                        placeholder="123456"
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        className="text-center text-2xl tracking-widest"
-                        maxLength={6}
-                      />
-                      <p className="text-xs text-muted-foreground text-center">
-                        Check your phone for the 6-digit code
-                      </p>
-                    </div>
-
-                    <Button
-                      onClick={handleVerifyOtp}
-                      disabled={loading}
-                      className="w-full btn-gold text-lg py-6"
-                    >
-                      {loading ? 'Verifying...' : 'Join the Party! 🎉'}
-                    </Button>
-
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setOtpSent(false);
-                        setOtp('');
-                      }}
-                      className="w-full"
-                    >
-                      Use different number
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-2 text-center">
-                      <p className="text-lg">A magic link has been sent to your email. Click it to sign in.</p>
-                      <p className="text-xs text-muted-foreground">If you don't see it, check your spam folder.</p>
-                    </div>
-
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setOtpSent(false);
-                      }}
-                      className="w-full"
-                    >
-                      Use different email
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
+            <Button onClick={handleJoin} disabled={loading} className="w-full btn-festive text-lg py-6">
+              {loading ? 'Joining...' : 'Join Event'}
+            </Button>
           </div>
         </div>
       </div>

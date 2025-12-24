@@ -1,35 +1,22 @@
-import { useState, useEffect } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { useLocalAuth } from '@/hooks/useLocalAuth';
+
+// NOTE: This project previously used Supabase Auth.
+// We keep the public hook name (`useAuth`) so the rest of the app doesn't
+// need widespread rewrites, but it now uses local-only credentials.
+//
+// ⚠️ Demo-only security: credentials are stored in the browser and are not
+// shared between devices.
 
 export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const local = useLocalAuth();
 
-  useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
+  // Shape the user to match the parts of Supabase `User` our app uses.
+  const user = local.user
+    ? ({ id: local.user.id, user_metadata: { display_name: local.user.username } } as any)
+    : null;
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+  // We don't have a session concept in local auth.
+  const session = null;
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-  };
-
-  return { user, session, loading, signOut };
+  return { user, session, loading: local.loading, signOut: local.signOut };
 };
